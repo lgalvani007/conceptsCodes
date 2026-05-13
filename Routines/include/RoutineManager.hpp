@@ -18,8 +18,7 @@ class RoutineManager {
     auto addRoutine = [&](std::string fullName, RoutineFunction variantFunc, ComponentLength l, ComponentDirection d) {
       Routines.push_back({std::move(fullName), std::move(variantFunc), d, l});
     };
-    BaseRoutineIndices.push_back(Routines.size());
-    BaseRoutineNames.emplace_back(name);
+    size_t startIndex = Routines.size();
     if constexpr (std::is_invocable_v<Func, ComponentLength, ComponentDirection> || std::is_invocable_v<Func, ComponentDirection, ComponentLength>) {
       for (size_t d = 0; d < dirs.size(); ++d) {
         for (size_t l = 0; l < lengths.size(); ++l) {
@@ -47,6 +46,8 @@ class RoutineManager {
     } else {
       static_assert(!std::is_same_v<Func, Func>, "Invalid routine function signature");
     }
+    size_t generatedCount = Routines.size() - startIndex;
+    BaseRoutines.push_back({std::string(name), startIndex, generatedCount});
   }
 
   void dumpRoutines() const {
@@ -58,10 +59,10 @@ class RoutineManager {
   }
 
   void dumpBaseRoutines() const {
-    for (size_t i = 0; i < BaseRoutineIndices.size(); ++i) {
-      size_t realIndex = BaseRoutineIndices[i];
-      std::cout << "[" << i << "] " << BaseRoutineNames[i]
-                /*<< " Real index: " << realIndex*/ << "\n";
+    for (size_t i = 0; i < BaseRoutines.size(); ++i) {
+      std::cout << "[" << i << "] " << BaseRoutines[i].name
+                /*<< "Real start index: " << BaseRoutines[i].startIndex*/
+                << ", Variations: " << BaseRoutines[i].variationCount << "\n";
     }
   }
 
@@ -71,8 +72,8 @@ class RoutineManager {
   }
 
   std::string_view getBaseRoutineName(size_t baseIndex) const {
-    if (baseIndex >= BaseRoutineNames.size()) return {};
-    return BaseRoutineNames[baseIndex];
+    if (baseIndex >= BaseRoutines.size()) return {};
+    return BaseRoutines[baseIndex].name;
   }
 
   size_t getRoutineCount() const {
@@ -80,27 +81,12 @@ class RoutineManager {
   }
 
   size_t getBaseRoutineCount() const {
-    return BaseRoutineIndices.size();
+    return BaseRoutines.size();
   }
 
   size_t getRoutineVariantionsCount(size_t baseIndex) const {
-    if (baseIndex >= BaseRoutineIndices.size()) return 0;
-    const auto& baseRoutine = Routines[BaseRoutineIndices[baseIndex]];
-    return std::visit([&](const auto& func) -> size_t {
-      using T = std::decay_t<decltype(func)>;
-      if constexpr (std::is_same_v<T, DistanceRoutineFunction>) {
-        return lengths.size();  // only length variations
-      } else if constexpr (std::is_same_v<T, SideRoutineFunction>) {
-        return dirs.size();  // only direction variations
-      } else if constexpr (std::is_same_v<T, BothRoutineFunction> || std::is_same_v<T, BothReverseRoutineFunction>) {
-        return lengths.size() * dirs.size();  // both direction and length variations
-      } else if constexpr (std::is_same_v<T, NoneRoutineFunction>) {
-        return 1;  // no variations
-      } else {
-        return 0;  // should not happen
-      }
-    },
-                      baseRoutine.function);
+    if (baseIndex >= BaseRoutines.size()) return 0;
+    return BaseRoutines[baseIndex].variationCount;
   }
 
   size_t getRoutineIndex(std::string_view name) const {
@@ -111,9 +97,11 @@ class RoutineManager {
   }
 
   size_t getRoutineIndexByParams(size_t baseIndex, size_t direction = 0, size_t length = 0) const {
-    if (baseIndex >= BaseRoutineIndices.size()) return static_cast<size_t>(-1);
+    if (baseIndex >= BaseRoutines.size()) return static_cast<size_t>(-1);
 
-    const auto& baseRoutine = Routines[BaseRoutineIndices[baseIndex]];
+    size_t startIndex = BaseRoutines[baseIndex].startIndex;
+    const auto& baseRoutine = Routines[startIndex];
+
     size_t variationOffset = 0;
     std::visit([&](const auto& func) {
       using T = std::decay_t<decltype(func)>;
@@ -127,19 +115,21 @@ class RoutineManager {
     },
                baseRoutine.function);
 
-    size_t finalIndex = BaseRoutineIndices[baseIndex] + variationOffset;
+    size_t finalIndex = startIndex + variationOffset;
     if (finalIndex >= Routines.size()) return static_cast<size_t>(-1);
 
     return finalIndex;
   }
 
   size_t getRoutineIndexByVariation(size_t baseIndex, size_t variation) const {
-    if (baseIndex >= BaseRoutineIndices.size()) return static_cast<size_t>(-1);
+    if (baseIndex >= BaseRoutines.size()) return static_cast<size_t>(-1);
 
-    size_t variationCount = getRoutineVariantionsCount(baseIndex);
+    size_t variationCount = BaseRoutines[baseIndex].variationCount;
     if (variation >= variationCount) return static_cast<size_t>(-1);
 
-    const auto& baseRoutine = Routines[BaseRoutineIndices[baseIndex]];
+    size_t startIndex = BaseRoutines[baseIndex].startIndex;
+    const auto& baseRoutine = Routines[startIndex];
+
     size_t direction = 0, length = 0;
 
     std::visit([&](const auto& func) {
@@ -196,9 +186,14 @@ class RoutineManager {
     ComponentDirection direction;
     ComponentLength length;
   };
+
+  struct BaseRoutine {
+    std::string name;
+    size_t startIndex;
+    size_t variationCount;
+  };
   std::vector<Routine> Routines;
-  std::vector<size_t> BaseRoutineIndices;
-  std::vector<std::string> BaseRoutineNames;
+  std::vector<BaseRoutine> BaseRoutines;
 
   static constexpr std::array<ComponentLength, 3> lengths = {ComponentLength::Short, ComponentLength::Normal, ComponentLength::Long};
   static constexpr std::array<ComponentDirection, 2> dirs = {ComponentDirection::Left, ComponentDirection::Right};
