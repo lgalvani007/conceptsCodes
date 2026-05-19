@@ -207,6 +207,24 @@ class RoutineManager {
     return getBaseRoutineName(actualBaseIndex);
   }
 
+  size_t getRoutineCount(GroupId group) const {
+    if (group >= GroupId::NUM_ROUTINE_GROUPS) return 0;
+
+    size_t totalVariations = 0;
+    const auto& groupData = Groups[static_cast<size_t>(group)];
+
+    for (size_t baseIndex : groupData.baseIndices) {
+      totalVariations += BaseRoutines[baseIndex].variationCount;
+    }
+
+    return totalVariations;
+  }
+
+  size_t getBaseRoutineCount(GroupId group) const {
+    if (group >= GroupId::NUM_ROUTINE_GROUPS) return 0;
+    return Groups[static_cast<size_t>(group)].baseIndices.size();
+  }
+
   size_t getRoutineVariantionsCount(size_t relativeBaseIndex, GroupId group) const {
     if (group >= GroupId::NUM_ROUTINE_GROUPS) return 0;
     const auto& groupData = Groups[static_cast<size_t>(group)];
@@ -216,6 +234,20 @@ class RoutineManager {
     size_t actualBaseIndex = groupData.baseIndices[relativeBaseIndex];
     const auto& baseRoutine = BaseRoutines[actualBaseIndex];
     return baseRoutine.variationCount;
+  }
+
+  size_t getRoutineIndex(size_t relativeIndex, GroupId group) const {
+    if (group >= GroupId::NUM_ROUTINE_GROUPS) return static_cast<size_t>(-1);
+    const auto& groupData = Groups[static_cast<size_t>(group)];
+
+    for (size_t baseIndex : groupData.baseIndices) {
+      const auto& baseRoutine = BaseRoutines[baseIndex];
+      if (relativeIndex < baseRoutine.variationCount) {
+        return baseRoutine.startIndex + relativeIndex;
+      }
+      relativeIndex -= baseRoutine.variationCount;
+    }
+    return static_cast<size_t>(-1);
   }
 
   size_t getRoutineIndexByVariation(size_t relativeBaseIndex, size_t variationIndex, GroupId group) const {

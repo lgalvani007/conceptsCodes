@@ -1,55 +1,51 @@
-#include <conio.h>  // Biblioteca do Windows para capturar teclas sem dar Enter
+#include <conio.h>  // Lembre-se de remover/substituir se for compilar para o RP2040
 
 #include <iostream>
-#include <string>
-#include <vector>
+#include <string_view>
 
+#include "RoutineGroups.hpp"
 #include "RoutineManager.hpp"
 #include "Routines.hpp"
 
 // ==========================================
-// FUNÇÃO UTILITÁRIA PARA DESENHAR MENUS (CARROSSEL)
+// FUNÇÃO DE RENDERIZAÇÃO ZERO-RAM
 // ==========================================
-// Retorna o índice (0 a N) da opção selecionada pelo usuário
-int drawMenu(const std::string& title, const std::vector<std::string>& options) {
-  if (options.empty()) return -1;
+template <typename FetchNameFunc>
+int drawMenu(std::string_view title, size_t itemCount, FetchNameFunc getName) {
+  if (itemCount == 0) return -1;
 
   int selected = 0;
+  size_t totalOptions = itemCount + 1;  // +1 é sempre a opção "Voltar"
+
   while (true) {
-    system("cls");  // Limpa a tela do terminal do Windows
+    system("cls");  // No RP2040, substitua pelas funções do seu display OLED (ex: display.clear())
 
     std::cout << "========================================\n";
     std::cout << "   " << title << "\n";
     std::cout << "========================================\n\n";
 
-    // Exibe APENAS a opção atual (Estilo Carrossel)
-    std::cout << "           < " << options[selected] << " >\n\n";
+    // Pega o nome direto do Manager na hora de desenhar
+    std::string_view currentName = (selected < itemCount) ? getName(selected) : "Voltar";
 
-    // Exibe o contador de navegação para o usuário não se perder
-    std::cout << "             [ " << (selected + 1) << " / " << options.size() << " ]\n\n";
-
+    std::cout << "           < " << currentName << " >\n\n";
+    std::cout << "             [ " << (selected + 1) << " / " << totalOptions << " ]\n\n";
     std::cout << "----------------------------------------\n";
-    std::cout << "(<-/-> ou UP/DOWN para mudar, ENTER para escolher)";
+    std::cout << "(<-/-> ou UP/DOWN para mudar, ENTER para escolher)\n";
 
-    // Captura a tecla
     int key = _getch();
-
-    if (key == 224) {  // 224 é o código que avisa que uma Seta foi apertada
-      key = _getch();  // O segundo getch pega qual seta foi
-
-      // Seta para CIMA (72) ou Seta para ESQUERDA (75) = Voltar
-      if (key == 72 || key == 75) {
-        selected = (selected > 0) ? selected - 1 : options.size() - 1;
+    if (key == 224) {
+      key = _getch();
+      if (key == 72 || key == 75) {  // Cima / Esquerda
+        selected = (selected > 0) ? selected - 1 : totalOptions - 1;
+      } else if (key == 80 || key == 77) {  // Baixo / Direita
+        selected = (selected < totalOptions - 1) ? selected + 1 : 0;
       }
-      // Seta para BAIXO (80) ou Seta para DIREITA (77) = Avançar
-      else if (key == 80 || key == 77) {
-        selected = (selected < options.size() - 1) ? selected + 1 : 0;
-      }
-    } else if (key == 13) {  // 13 é o código da tecla ENTER
+    } else if (key == 13) {  // ENTER
       return selected;
     }
   }
 }
+
 // ==========================================
 // FUNÇÃO PRINCIPAL
 // ==========================================
@@ -57,96 +53,79 @@ int main() {
   auto& manager = RoutineManager::getInstance();
 
   while (true) {
-    std::vector<std::string> modeOptions = {
-        "Modo Lista Direta (Todas as variacoes de uma vez)",
-        "Modo Hierarquico (Filtro por Estrategia Base)",
-        "Sair do Simulador"};
-    int mode = drawMenu("MEGA SUMO - MODO DE NAVEGACAO", modeOptions);
+    // ---------------------------------------------------------
+    // 1. MODO DE NAVEGAÇÃO
+    // ---------------------------------------------------------
+    int mode = drawMenu("MODO DE NAVEGACAO", 2, [&](size_t i) -> std::string_view {
+      return (i == 0) ? "Lista Direta (Sem Base)" : "Hierarquico (Filtro por Base)";
+    });
+    if (mode == 2) break;  // Saiu do programa
 
-    if (mode == 2) break;  // Sair
-
-    std::vector<std::string> groupOptions;
-    for (size_t i = 0; i < static_cast<size_t>(GroupId::NUM_ROUTINE_GROUPS); ++i) {
-      groupOptions.push_back(std::string(manager.getGroupName(static_cast<GroupId>(i))));
-    }
-    groupOptions.push_back("Voltar");
-
-    int groupSelection = drawMenu("SELECIONE O GRUPO", groupOptions);
-    if (groupSelection == groupOptions.size() - 1) continue;  // Voltou
+    // ---------------------------------------------------------
+    // 2. ESCOLHER O GRUPO
+    // ---------------------------------------------------------
+    size_t groupCount = manager.getGroupCount();
+    int groupSelection = drawMenu("SELECIONE O GRUPO", groupCount, [&](size_t i) {
+      return manager.getGroupName(static_cast<GroupId>(i));
+    });
+    if (groupSelection == groupCount) continue;  // Clicou em "Voltar"
 
     GroupId selectedGroup = static_cast<GroupId>(groupSelection);
-    size_t exactGlobalIndex = static_cast<size_t>(-1);  // Vai guardar a rotina final a ser executada
+    size_t exactGlobalIndex = static_cast<size_t>(-1);
 
+    // ---------------------------------------------------------
+    // 3 e 4. NAVEGAÇÃO INTERNA
+    // ---------------------------------------------------------
     if (mode == 0) {
-      // MODO 1: LISTA DIRETA (Flat)
-      std::vector<std::string> flatOptions;
-      std::vector<size_t> flatGlobalIndices;  // Guarda o índice global de cada opção para podermos dar o run() depois
+      // MODO LISTA DIRETA: Mostra todas as variações do grupo
+      size_t flatCount = manager.getRoutineCount(selectedGroup);
+      if (flatCount == 0) continue;  // Grupo vazio
 
-      size_t baseIdx = 0;
-      // Varre todas as bases desse grupo usando as funções relativas
-      while (true) {
-        std::string_view baseName = manager.getBaseRoutineName(baseIdx, selectedGroup);
-        if (baseName.empty()) break;  // Acabaram as bases desse grupo
+      int flatSelection = drawMenu("TODAS AS VARIACOES", flatCount, [&](size_t i) {
+        return manager.getRoutineName(i, selectedGroup);
+      });
+      if (flatSelection == flatCount) continue;  // Voltar
 
-        size_t varCount = manager.getRoutineVariantionsCount(baseIdx, selectedGroup);
-        for (size_t v = 0; v < varCount; ++v) {
-          flatOptions.push_back(std::string(manager.getRoutineName(baseIdx, v, selectedGroup)));
-          // Salva o ID global dessa variação
-          flatGlobalIndices.push_back(manager.getRoutineIndexByVariation(baseIdx, v, selectedGroup));
-        }
-        baseIdx++;
-      }
-
-      flatOptions.push_back("Voltar");
-      int flatSelection = drawMenu("TODAS AS VARIACOES DO GRUPO", flatOptions);
-      if (flatSelection == flatOptions.size() - 1) continue;
-
-      exactGlobalIndex = flatGlobalIndices[flatSelection];
+      exactGlobalIndex = manager.getRoutineIndex(flatSelection, selectedGroup);
 
     } else {
-      // MODO 2: HIERÁRQUICO (Base -> Variação)
-      std::vector<std::string> baseOptions;
-      size_t baseIdx = 0;
+      // MODO HIERÁRQUICO: Escolhe Base -> Escolhe Variação
+      size_t baseCount = manager.getBaseRoutineCount(selectedGroup);
+      if (baseCount == 0) continue;  // Grupo vazio
 
-      // Pega o nome das Bases
-      while (true) {
-        std::string_view baseName = manager.getBaseRoutineName(baseIdx, selectedGroup);
-        if (baseName.empty()) break;
-        baseOptions.push_back(std::string(baseName));
-        baseIdx++;
-      }
+      int selectedBase = drawMenu("ESTRATEGIA BASE", baseCount, [&](size_t i) {
+        return manager.getBaseRoutineName(i, selectedGroup);
+      });
+      if (selectedBase == baseCount) continue;  // Voltar
 
-      baseOptions.push_back("Voltar");
-      int selectedBase = drawMenu("ESCOLHA A ESTRATEGIA BASE", baseOptions);
-      if (selectedBase == baseOptions.size() - 1) continue;
-
-      // Agora pega as Variações dessa Base específica
-      std::vector<std::string> varOptions;
       size_t varCount = manager.getRoutineVariantionsCount(selectedBase, selectedGroup);
-      for (size_t v = 0; v < varCount; ++v) {
-        varOptions.push_back(std::string(manager.getRoutineName(selectedBase, v, selectedGroup)));
-      }
 
-      varOptions.push_back("Voltar");
-      int selectedVar = drawMenu("ESCOLHA A VARIACAO (Parametros)", varOptions);
-      if (selectedVar == varOptions.size() - 1) continue;
+      int selectedVar = drawMenu("VARIACAO (Parametros)", varCount, [&](size_t i) {
+        return manager.getRoutineName(selectedBase, i, selectedGroup);
+      });
+      if (selectedVar == varCount) continue;  // Voltar
 
       exactGlobalIndex = manager.getRoutineIndexByVariation(selectedBase, selectedVar, selectedGroup);
     }
 
-    system("cls");
-    std::cout << "\n========================================\n";
-    std::cout << "        PREPARANDO PARA LUTAR!          \n";
-    std::cout << "========================================\n\n";
-    std::cout << "Rotina Selecionada: " << manager.getRoutineName(exactGlobalIndex) << "\n";
-    std::cout << "Indice Global na Memoria: [" << exactGlobalIndex << "]\n\n";
+    // ---------------------------------------------------------
+    // 5. EXECUTAR
+    // ---------------------------------------------------------
+    if (exactGlobalIndex != static_cast<size_t>(-1)) {
+      system("cls");
+      std::cout << "\n========================================\n";
+      std::cout << "        PREPARANDO PARA LUTAR!          \n";
+      std::cout << "========================================\n\n";
+      std::cout << "Estrategia: " << manager.getRoutineName(exactGlobalIndex) << "\n";
+      std::cout << "Indice Global na Memoria: [" << exactGlobalIndex << "]\n\n";
 
-    manager.run(exactGlobalIndex);
+      manager.run(exactGlobalIndex);
 
-    std::cout << "\n========================================\n";
-    std::cout << "Pressione qualquer tecla para voltar ao menu...";
-    _getch();  // Pausa a tela para você ler o console antes de limpar
+      std::cout << "\n========================================\n";
+      std::cout << "Pressione qualquer tecla para voltar ao menu...";
+      _getch();
+    }
   }
-  system("cls");
+
   return 0;
 }
