@@ -3,27 +3,10 @@
 #include "RoutineManager.hpp"
 #include "Routines.hpp"
 
-#define REG_ROUTINE(mgr, func) mgr.registerRoutine(#func, func)
-
 int main() {
-  RoutineManager manager;
+  RoutineManager& manager = RoutineManager::getInstance();
 
-  REG_ROUTINE(manager, Frente);
-  REG_ROUTINE(manager, Re);
-  REG_ROUTINE(manager, Sete);
-  REG_ROUTINE(manager, setePerfeito);
-  REG_ROUTINE(manager, SeteMQP);
-  REG_ROUTINE(manager, Sete135);
-  REG_ROUTINE(manager, SetePerfeito135);
-  REG_ROUTINE(manager, SeteMQP135);
-  REG_ROUTINE(manager, Quatorze);
-  REG_ROUTINE(manager, VinteUm);
-  REG_ROUTINE(manager, AvancaGalena);
-  REG_ROUTINE(manager, Redirections);
-  REG_ROUTINE(manager, ReAvancado);
-  REG_ROUTINE(manager, ReAvancado60);
-  REG_ROUTINE(manager, Desempate);
-
+  // Registering routines
   std::cout << "========================================\n";
   std::cout << "   MEGA SUMO - GERENCIADOR DE ROTINAS   \n";
   std::cout << "========================================\n";
