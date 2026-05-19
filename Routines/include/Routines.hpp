@@ -2,6 +2,7 @@
 
 #include "Component.hpp"
 #include "Components.hpp"
+#include "RoutineGroups.hpp"
 #include "RoutineRegistry.hpp"
 
 void Sete(ComponentDirection direction) {
